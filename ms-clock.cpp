@@ -14,6 +14,9 @@
 #define PIN_LE   4
 #define PIN_OE   5
 
+#define OUTPUT_ENABLE 0
+#define OUTPUT_DISABLE 1
+
 // Data will be copied from src to dst
 const char src[] = "Hello, world! (from DMA)";
 char dst[count_of(src)];
@@ -23,6 +26,52 @@ int64_t alarm_callback(alarm_id_t id, void *user_data) {
     return 0;
 }
 
+uint8_t frame_buffer[4] = {0};
+uint8_t frame_buffer_count = 4;
+
+uint8_t segment_map[16] = {
+    0b00111111, // 0
+    0b00000110, // 1
+    0b01011011, // 2
+    0b01001111, // 3
+    0b01100110, // 4
+    0b01101101, // 5
+    0b01111101, // 6
+    0b00000111, // 7
+    0b01111111, // 8
+    0b01101111, // 9
+    0b10000000, // dot
+};
+
+void display_framebuffer(){
+    // Start with LE low and OE disabled
+    gpio_put(PIN_LE, 0);
+    gpio_put(PIN_OE, OUTPUT_DISABLE);
+
+    spi_write_blocking(SPI_PORT, frame_buffer, frame_buffer_count);
+
+    // Latch the data - pulse LE high
+    sleep_us(1); // Small delay to ensure data is stable
+    gpio_put(PIN_LE, 1);
+    sleep_us(1); // Hold LE high briefly
+    gpio_put(PIN_LE, 0);
+
+    // Enable outputs
+    gpio_put(PIN_OE, OUTPUT_ENABLE);
+}
+
+void display_number(uint32_t number)
+{
+    // Assuming a 4-digit 7-segment display
+    for(int i = 0; i < 4; i++)
+    {
+        uint8_t digit = number % 10;
+        frame_buffer[3 - i] = segment_map[digit];
+        number /= 10;
+    }
+
+    display_framebuffer();
+}
 
 int main()
 {
@@ -33,11 +82,13 @@ int main()
     gpio_set_function(PIN_SCK,  GPIO_FUNC_SPI);
     gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
 
-    // Chip select is active-low, so we'll initialise it to a driven-high state
+    // Initialize LE and OE pins
+    gpio_init(PIN_LE);
+    gpio_init(PIN_OE);
     gpio_set_dir(PIN_LE, GPIO_OUT);
-    gpio_put(PIN_LE, 0);
     gpio_set_dir(PIN_OE, GPIO_OUT);
-    gpio_put(PIN_OE, 0);
+
+
 
 
 
@@ -79,8 +130,18 @@ int main()
     //printf("USB Clock Frequency is %d Hz\n", clock_get_hz(clk_usb));
     // For more examples of clocks use see https://github.com/raspberrypi/pico-examples/tree/master/clocks
 
-    while (true) {
-        printf("Hello, world!\n");
-        sleep_ms(1000);
+    uint64_t target_time = time_us_64() + 100;
+    uint32_t counter = 0;
+    while (true)
+    {
+        display_number(counter);
+        counter++;
+        if(counter > 9999)
+        {
+            counter = 0;
+        }
+
+        busy_wait_until(target_time);
+        target_time += 100;
     }
 }
